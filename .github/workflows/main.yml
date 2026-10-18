@@ -1,7 +1,63 @@
-      - name: Extract LeanType Keyboard Project
+name: Build Haven Keyboard APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract uploaded project
         shell: bash
         run: |
-          mkdir -p extracted-project
-          unzip -q havenkey.zip -d extracted-project
-          echo "Extracted project files:"
-          find extracted-project -maxdepth 3 -type f
+          test -f havenkey.zip || { echo 'Missing havenkey.zip'; exit 1; }
+          mkdir -p project
+          unzip -q havenkey.zip -d project
+          test -f project/package.json || { echo 'package.json not found at ZIP root'; exit 1; }
+          test -f project/android/gradlew || { echo 'android/gradlew not found in ZIP'; exit 1; }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9.12.0'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install JavaScript dependencies
+        working-directory: project
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Android debug APK
+        working-directory: project/android
+        env:
+          CI: 'true'
+          NODE_ENV: production
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Haven-Keyboard-APK
+          path: project/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
